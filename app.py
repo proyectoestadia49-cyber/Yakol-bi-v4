@@ -666,13 +666,20 @@ if "datos" in st.session_state:
                             desglose_html = (f'<div class="vc-puntos">Recibo Inicial ${ri:,.0f} -- '
                                               f'Recibo Ordinario ${ro:,.0f}</div>')
 
-                    tarjetas_html += f'''<div class="variable-card" style="border-top-color:{color_nivel};">
-                        <div class="vc-nombre">{etiqueta}</div>
-                        <div class="vc-valor">{fmt(valor_raw)}</div>
-                        <div class="vc-nivel" style="background-color:{color_nivel};">{nivel}</div>
-                        <div class="vc-puntos">Puntaje {puntaje_txt} -- {puntos_txt}</div>
-                        {desglose_html}
-                        </div>'''
+                    # Todo en una sola linea (sin saltos de linea internos) --
+                    # una linea en blanco a mitad de un bloque HTML rompe el
+                    # reconocimiento de Markdown y el resto se muestra como
+                    # texto/codigo en vez de renderizarse (pasaba cuando
+                    # desglose_html quedaba vacio, dejando una linea en blanco).
+                    tarjetas_html += (
+                        f'<div class="variable-card" style="border-top-color:{color_nivel};">'
+                        f'<div class="vc-nombre">{etiqueta}</div>'
+                        f'<div class="vc-valor">{fmt(valor_raw)}</div>'
+                        f'<div class="vc-nivel" style="background-color:{color_nivel};">{nivel}</div>'
+                        f'<div class="vc-puntos">Puntaje {puntaje_txt} -- {puntos_txt}</div>'
+                        f'{desglose_html}'
+                        f'</div>'
+                    )
                 st.markdown(f'<div class="variable-card-grid">{tarjetas_html}</div>', unsafe_allow_html=True)
 
                 st.plotly_chart(grafica_contribucion_variables(fila_sel), use_container_width=True)
