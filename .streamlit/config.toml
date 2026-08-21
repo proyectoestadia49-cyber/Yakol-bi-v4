@@ -1,0 +1,15 @@
+# Tema visual de YAKOL BI -- fondo azul marino fuerte con acentos en azul
+# brillante, texto claro. Se usa el theming nativo de Streamlit (en vez de
+# CSS a mano) para que TODOS los widgets nativos (selectbox, botones,
+# dataframes, tabs, cajas de exito/info/advertencia/error) tengan contraste
+# correcto automaticamente. Las tarjetas/graficas personalizadas siguen
+# siendo blancas (config_visual.py) para que resalten sobre este fondo,
+# como pidio el usuario. Los colores de semaforo (verde/ambar/rojo) NO se
+# tocan aqui -- viven en config_visual.py sin cambios.
+[theme]
+base = "dark"
+primaryColor = "#2E86AB"
+backgroundColor = "#0B1F3A"
+secondaryBackgroundColor = "#132C52"
+textColor = "#F4F7FB"
+font = "sans serif"

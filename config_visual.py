@@ -6,11 +6,12 @@ use exactamente la misma paleta, sin repetir codigos de color en cada
 archivo.
 """
 
-COLOR_PRIMARIO = "#0B2A4A"      # Azul marino Yakol -- encabezados, texto principal
+COLOR_PRIMARIO = "#0B2A4A"      # Azul marino Yakol -- encabezados, texto principal (sobre tarjetas blancas)
 COLOR_SECUNDARIO = "#1F5C9E"    # Azul medio -- botones, acentos
 COLOR_ACENTO = "#2E86AB"        # Azul-verde -- series secundarias en graficas
-COLOR_FONDO = "#F4F7FB"         # Gris muy claro -- fondo general
-COLOR_TARJETA = "#FFFFFF"       # Fondo de tarjetas
+COLOR_FONDO = "#0B1F3A"         # Azul marino fuerte -- fondo general (mismo tono que .streamlit/config.toml)
+COLOR_TARJETA = "#FFFFFF"       # Fondo de tarjetas -- se mantienen blancas para resaltar sobre el fondo azul
+COLOR_TEXTO_CLARO = "#F4F7FB"   # Texto claro -- para lo que se dibuja directo sobre el fondo azul (sin tarjeta)
 
 COLOR_EXITO = "#1E8E5A"         # Verde -- semaforo bajo riesgo / cumple
 COLOR_ADVERTENCIA = "#D68A1F"   # Ambar -- semaforo riesgo medio
@@ -45,28 +46,36 @@ NIVEL_COLOR = {
     "No evaluable": COLOR_NEUTRO,
 }
 
-FUENTE = "Segoe UI, -apple-system, sans-serif"
+FUENTE = "'Inter', 'Segoe UI', -apple-system, sans-serif"
 PLANTILLA_PLOTLY = "plotly_white"
 
 CSS_CORPORATIVO = f"""
 <style>
+    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap');
+
     .stApp {{ background-color: {COLOR_FONDO}; font-family: {FUENTE}; }}
+    /* Streamlit aplica su propia tipografia (Source Sans) directamente sobre
+    varios contenedores internos (Emotion/CSS-in-JS), lo que gana por sobre
+    la herencia normal de .stApp -- se fuerza con !important, preservando
+    explicitamente la fuente de icono (Material Symbols) despues. */
+    .stApp, .stApp * {{ font-family: {FUENTE} !important; }}
+    [data-testid="stIconMaterial"] {{ font-family: "Material Symbols Rounded" !important; }}
 
     #MainMenu, footer, header {{ visibility: hidden; }}
 
     .yakol-topbar {{
         display: flex; align-items: center; gap: 18px;
         background: linear-gradient(90deg, {COLOR_PRIMARIO} 0%, #123A63 100%);
-        padding: 18px 32px; border-radius: 12px; margin-bottom: 22px;
-        box-shadow: 0 4px 14px rgba(11,42,74,0.25);
+        padding: 22px 34px; border-radius: 14px; margin-bottom: 26px;
+        box-shadow: 0 8px 24px rgba(0,0,0,0.35);
     }}
     .yakol-topbar img {{ height: 54px; border-radius: 6px; }}
-    .yakol-topbar h1 {{ color: white; margin: 0; font-size: 22px; font-weight: 600; }}
+    .yakol-topbar h1 {{ color: white; margin: 0; font-size: 23px; font-weight: 700; letter-spacing: 0.01em; }}
     .yakol-topbar p {{ color: #C9D9EA; margin: 0; font-size: 13px; }}
 
     .kpi-card {{
-        background: {COLOR_TARJETA}; border-radius: 14px; padding: 18px 20px;
-        box-shadow: 0 2px 10px rgba(11,42,74,0.08); border-left: 5px solid {COLOR_SECUNDARIO};
+        background: {COLOR_TARJETA}; border-radius: 14px; padding: 20px 22px;
+        box-shadow: 0 10px 26px rgba(0,0,0,0.28); border-left: 5px solid {COLOR_SECUNDARIO};
         height: 100%;
     }}
     .kpi-card .kpi-label {{
@@ -83,8 +92,8 @@ CSS_CORPORATIVO = f"""
     .kpi-card.peligro .kpi-value {{ color: {COLOR_PELIGRO}; }}
 
     .seccion-titulo {{
-        color: {COLOR_PRIMARIO}; font-size: 16px; font-weight: 700;
-        margin: 22px 0 10px 0; padding-bottom: 6px; border-bottom: 2px solid #E2E8F0;
+        color: {COLOR_TEXTO_CLARO}; font-size: 17.5px; font-weight: 700; letter-spacing: 0.015em;
+        margin: 30px 0 14px 0; padding-bottom: 8px; border-bottom: 2px solid rgba(244,247,251,0.18);
     }}
 
     .semaforo-badge {{
@@ -96,8 +105,8 @@ CSS_CORPORATIVO = f"""
     .semaforo-alto {{ background-color: {COLOR_PELIGRO}; }}
 
     .hallazgo-card {{
-        background: {COLOR_TARJETA}; border-radius: 10px; padding: 14px 18px;
-        margin-bottom: 10px; box-shadow: 0 1px 6px rgba(11,42,74,0.06);
+        background: {COLOR_TARJETA}; border-radius: 10px; padding: 15px 19px;
+        margin-bottom: 11px; box-shadow: 0 6px 18px rgba(0,0,0,0.22);
         border-left: 4px solid {COLOR_SECUNDARIO};
     }}
     .hallazgo-card.riesgo {{ border-left-color: {COLOR_PELIGRO}; }}
@@ -109,8 +118,9 @@ CSS_CORPORATIVO = f"""
     .hallazgo-seccion b {{ color: {COLOR_PRIMARIO}; }}
 
     .scroll-container {{
-        max-height: 480px; overflow-y: auto; border: 1px solid #E2E8F0; border-radius: 8px;
-        padding: 4px 14px; background-color: white; margin-bottom: 20px;
+        max-height: 480px; overflow-y: auto; border: 1px solid #E2E8F0; border-radius: 10px;
+        padding: 4px 14px; background-color: white; margin-bottom: 22px;
+        box-shadow: 0 8px 22px rgba(0,0,0,0.25);
     }}
     .riesgo-item {{ border-bottom: 1px solid #EDEFF3; padding: 12px 0; }}
     .riesgo-item:last-child {{ border-bottom: none; }}
@@ -154,8 +164,8 @@ CSS_CORPORATIVO = f"""
         gap: 10px; margin-bottom: 18px;
     }}
     .variable-card {{
-        background: {COLOR_TARJETA}; border-radius: 10px; padding: 12px 14px;
-        box-shadow: 0 1px 6px rgba(11,42,74,0.06); border-top: 4px solid {COLOR_NEUTRO};
+        background: {COLOR_TARJETA}; border-radius: 10px; padding: 13px 15px;
+        box-shadow: 0 6px 16px rgba(0,0,0,0.22); border-top: 4px solid {COLOR_NEUTRO};
     }}
     .variable-card .vc-nombre {{
         font-size: 11px; color: {COLOR_NEUTRO}; text-transform: uppercase;
@@ -170,22 +180,23 @@ CSS_CORPORATIVO = f"""
 
     .interpretacion-box {{
         background-color: #F4F7FB; border: 1px solid #E2E8F0; border-left: 4px solid {COLOR_SECUNDARIO};
-        border-radius: 6px; padding: 12px 16px; margin: 6px 0 22px 0;
-        font-size: 13px; color: #333; line-height: 1.55;
+        border-radius: 8px; padding: 13px 17px; margin: 8px 0 24px 0;
+        font-size: 13px; color: #333; line-height: 1.6; box-shadow: 0 6px 16px rgba(0,0,0,0.2);
     }}
     .interpretacion-box b {{ color: {COLOR_PRIMARIO}; font-size: 12px; letter-spacing: 0.4px; }}
 
     div.stButton > button {{
         background-color: {COLOR_SECUNDARIO}; color: white; font-weight: 600;
-        border-radius: 8px; border: none; padding: 0.6em 1.6em;
+        border-radius: 9px; border: none; padding: 0.65em 1.8em;
+        box-shadow: 0 6px 16px rgba(0,0,0,0.3); transition: background-color 0.15s ease;
     }}
-    div.stButton > button:hover {{ background-color: {COLOR_PRIMARIO}; color: white; }}
+    div.stButton > button:hover {{ background-color: {COLOR_ACENTO}; color: white; }}
 
-    div[data-testid="stMetricValue"] {{ color: {COLOR_PRIMARIO}; }}
+    div[data-testid="stMetricValue"] {{ color: {COLOR_TEXTO_CLARO}; }}
 
-    .stTabs [data-baseweb="tab-list"] {{ gap: 4px; }}
+    .stTabs [data-baseweb="tab-list"] {{ gap: 5px; }}
     .stTabs [data-baseweb="tab"] {{
-        background-color: white; border-radius: 8px 8px 0 0; padding: 10px 20px;
+        background-color: white; border-radius: 9px 9px 0 0; padding: 11px 22px;
         font-weight: 600; color: {COLOR_NEUTRO};
     }}
     .stTabs [aria-selected="true"] {{ background-color: {COLOR_PRIMARIO}; color: white; }}

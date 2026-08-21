@@ -18,12 +18,12 @@ import streamlit as st
 
 from ingesta import ingestar_zip, detectar_periodo_de_nombre
 from clasificador import clasificar_lote
-from extractores import EXTRACTORES, extraer_bonos_promotores
+from extractores import EXTRACTORES, extraer_bonos_promotores, extraer_polizas_pagadas
 from transformacion import (
     construir_dim_periodo, construir_dim_asesor, construir_dim_promotor,
     construir_fact_igc, construir_fact_limra, construir_historico_actividad,
     construir_resumen_bonos, construir_historico_gmm, construir_historico_traspasos,
-    fusionar_periodo, fusionar_dim_asesor,
+    construir_historico_polizas_pagadas, fusionar_periodo, fusionar_dim_asesor,
 )
 from validaciones import validar_todo
 from log_procesamiento import RegistroLog, construir_log
@@ -62,6 +62,7 @@ LOGO_B64 = "iVBORw0KGgoAAAANSUhEUgAAAfQAAAH0CAYAAADL1t+KAAAQAElEQVR4AexdCWBdRdU+
 NOMBRES_HOJAS_HISTORICAS = [
     "Resumen_Bonos", "Historico_Actividad", "Historico_GMM", "Historico_Traspasos",
     "Dim_Asesor", "Dim_Promotor", "Dim_Periodo", "Fact_IGC", "Fact_LIMRA", "Log_Procesamiento",
+    "Historico_Polizas_Pagadas",
 ]
 
 st.set_page_config(page_title="YAKOL BI -- Dashboard Financiero", page_icon=None, layout="wide")
@@ -83,11 +84,14 @@ st.markdown(f"""
 
 with st.container():
     st.markdown('<div class="seccion-titulo">1. Cargar informacion del mes</div>', unsafe_allow_html=True)
-    col1, col2 = st.columns(2)
+    col1, col2, col3 = st.columns(3)
     with col1:
         archivo_zip = st.file_uploader("ZIP del mes", type=["zip"])
     with col2:
         excel_anterior = st.file_uploader("Excel Maestro anterior (opcional)", type=["xlsx"])
+    with col3:
+        archivo_excel_polizas = st.file_uploader("Excel de Polizas Pagadas (Vida y GMM)", type=["xlsx"])
+        st.caption("Obligatorio -- fuente prioritaria de produccion y primaje.")
 
     periodo_manual = None
     if archivo_zip is not None and detectar_periodo_de_nombre(archivo_zip.name) is None:
@@ -137,13 +141,16 @@ with st.container():
     with st.expander("Campana interna de Yakol este mes (deja en 0 si no hubo)", expanded=False):
         costo_campana_interna = st.number_input("Costo de la campana interna ($)", min_value=0.0, value=0.0, step=500.0)
 
-    procesar = st.button("Procesar informacion", type="primary", disabled=archivo_zip is None)
+    procesar = st.button("Procesar informacion", type="primary",
+                          disabled=archivo_zip is None or archivo_excel_polizas is None)
+    if archivo_zip is not None and archivo_excel_polizas is None:
+        st.warning("Falta el Excel de Polizas Pagadas -- es obligatorio para procesar el mes.")
 
 # =============================================================================
 # PROCESAMIENTO -- identico al de siempre
 # =============================================================================
 
-if procesar and archivo_zip is not None:
+if procesar and archivo_zip is not None and archivo_excel_polizas is not None:
     with st.spinner("Procesando..."):
         carpeta_temp = tempfile.mkdtemp()
         ruta_zip_temp = Path(carpeta_temp) / archivo_zip.name
@@ -193,6 +200,17 @@ if procesar and archivo_zip is not None:
         hist_traspasos_nuevo = construir_historico_traspasos(tablas_extraidas.get("Traspasos"), id_periodo)
         resumen_bonos_nuevo = construir_resumen_bonos(datos_bonos_promotor, id_periodo)
 
+        # Excel de Polizas Pagadas -- fuente prioritaria, usa el mismo
+        # id_periodo ya determinado por el ZIP (no necesita deteccion propia).
+        ruta_excel_polizas_temp = Path(carpeta_temp) / archivo_excel_polizas.name
+        with open(ruta_excel_polizas_temp, "wb") as f:
+            f.write(archivo_excel_polizas.getbuffer())
+        datos_polizas_pagadas = extraer_polizas_pagadas(str(ruta_excel_polizas_temp))
+        if datos_polizas_pagadas.empty:
+            st.warning("No se pudo extraer informacion del Excel de Polizas Pagadas -- revisa que tenga "
+                       "las hojas 'VIDA' y 'GMM' con las columnas esperadas.")
+        hist_polizas_pagadas_nuevo = construir_historico_polizas_pagadas(datos_polizas_pagadas, id_periodo)
+
         historico = cargar_excel_maestro_existente(excel_anterior, NOMBRES_HOJAS_HISTORICAS)
         dim_asesor = fusionar_dim_asesor(historico.get("Dim_Asesor"), dim_asesor_nuevo)
         if historico.get("Dim_Promotor") is not None and not historico["Dim_Promotor"].empty:
@@ -206,6 +224,7 @@ if procesar and archivo_zip is not None:
         hist_gmm = fusionar_periodo(historico.get("Historico_GMM"), hist_gmm_nuevo, id_periodo)
         hist_traspasos = fusionar_periodo(historico.get("Historico_Traspasos"), hist_traspasos_nuevo, id_periodo)
         resumen_bonos = fusionar_periodo(historico.get("Resumen_Bonos"), resumen_bonos_nuevo, id_periodo)
+        hist_polizas_pagadas = fusionar_periodo(historico.get("Historico_Polizas_Pagadas"), hist_polizas_pagadas_nuevo, id_periodo)
 
         conteo_esperado = tablas_extraidas["IGC"]["ID_Asesor"].nunique() if tablas_extraidas.get("IGC") is not None else None
         resultado_validacion = validar_todo(resumen_bonos, hist_actividad, fact_igc, fact_limra, id_periodo, conteo_esperado)
@@ -228,11 +247,11 @@ if procesar and archivo_zip is not None:
         seguimiento_igc = calcular_seguimiento_igc(fact_igc)
         seguimiento_limra = calcular_seguimiento_limra(fact_limra)
         seguimiento_bonos = calcular_seguimiento_bonos(resumen_bonos)
-        segmentacion = calcular_segmentacion_asesores(comparativo, hist_gmm, hist_actividad)
+        segmentacion = calcular_segmentacion_asesores(comparativo, hist_gmm, hist_actividad, hist_polizas_pagadas)
         alertas_anomalias = detectar_anomalias(hist_traspasos, hist_gmm)
         costeo_asesores = calcular_costeo_asesores(dim_asesor, id_periodo, sueldo_sharon, pct_sharon, gastos_canales, resumen_bonos)
         roi_campanas = calcular_roi_campanas(resumen_bonos, id_periodo, costo_campana_interna)
-        real_vs_plan = calcular_real_vs_plan(hist_actividad, dim_asesor, id_periodo)
+        real_vs_plan = calcular_real_vs_plan(hist_actividad, dim_asesor, id_periodo, hist_polizas_pagadas)
         sensibilidad = calcular_analisis_sensibilidad(resumen_bonos, id_periodo)
         escenarios_montecarlo = calcular_escenarios_montecarlo(resumen_bonos)
         tendencia = calcular_tendencia_proyeccion(resumen_bonos)
@@ -256,6 +275,7 @@ if procesar and archivo_zip is not None:
             "Historico_Actividad": hist_actividad, "Historico_GMM": hist_gmm,
             "Historico_Traspasos": hist_traspasos, "Dim_Asesor": dim_asesor, "Dim_Promotor": dim_promotor,
             "Dim_Periodo": dim_periodo, "Fact_IGC": fact_igc, "Fact_LIMRA": fact_limra, "Log_Procesamiento": log,
+            "Historico_Polizas_Pagadas": hist_polizas_pagadas,
         }, str(ruta_salida))
 
         # Guardamos todo en session_state para que las 3 pestanas lo compartan
@@ -621,6 +641,13 @@ if "datos" in st.session_state:
                     ("LIMRA", "LIMRA", "LIMRA_Indice_Real", lambda v: f"{v:.2f}%" if pd.notna(v) else "N/D"),
                     ("IGC", "IGC", "IGC_Indice_Real", lambda v: f"{v:.2f}%" if pd.notna(v) else "N/D"),
                 ]
+                # Prima Vida/GMM: si el Excel de Polizas Pagadas trajo dato para
+                # este asesor/periodo, se muestra el desglose Recibo Inicial vs.
+                # Recibo Ordinario como informacion adicional (pedido del usuario).
+                recibos_por_variable = {
+                    "Prima_Vida": ("Recibo_Inicial_Vida", "Recibo_Ordinario_Vida"),
+                    "Prima_GMM": ("Recibo_Inicial_GMM", "Recibo_Ordinario_GMM"),
+                }
                 tarjetas_html = ""
                 for clave, etiqueta, columna_valor, fmt in variables_info:
                     valor_raw = fila_sel.get(columna_valor)
@@ -630,11 +657,21 @@ if "datos" in st.session_state:
                     color_nivel = NIVEL_COLOR.get(nivel, COLOR_NEUTRO)
                     puntaje_txt = f"{puntaje:.0f}" if puntaje is not None and pd.notna(puntaje) else "N/D"
                     puntos_txt = f"{puntos:.1f} pts aportados" if puntos is not None and pd.notna(puntos) else "No evaluable este periodo"
+
+                    desglose_html = ""
+                    if clave in recibos_por_variable:
+                        col_ri, col_ro = recibos_por_variable[clave]
+                        ri, ro = fila_sel.get(col_ri), fila_sel.get(col_ro)
+                        if pd.notna(ri) and pd.notna(ro):
+                            desglose_html = (f'<div class="vc-puntos">Recibo Inicial ${ri:,.0f} -- '
+                                              f'Recibo Ordinario ${ro:,.0f}</div>')
+
                     tarjetas_html += f'''<div class="variable-card" style="border-top-color:{color_nivel};">
                         <div class="vc-nombre">{etiqueta}</div>
                         <div class="vc-valor">{fmt(valor_raw)}</div>
                         <div class="vc-nivel" style="background-color:{color_nivel};">{nivel}</div>
                         <div class="vc-puntos">Puntaje {puntaje_txt} -- {puntos_txt}</div>
+                        {desglose_html}
                         </div>'''
                 st.markdown(f'<div class="variable-card-grid">{tarjetas_html}</div>', unsafe_allow_html=True)
 

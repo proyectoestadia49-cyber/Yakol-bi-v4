@@ -131,7 +131,8 @@ def _lectura_final(indice):
 
 def calcular_indice_salud_negocio(comparativo_incumplimientos: pd.DataFrame,
                                    historico_gmm: pd.DataFrame,
-                                   historico_actividad: pd.DataFrame) -> pd.DataFrame:
+                                   historico_actividad: pd.DataFrame,
+                                   historico_polizas_pagadas: pd.DataFrame = None) -> pd.DataFrame:
     if comparativo_incumplimientos is None or comparativo_incumplimientos.empty:
         return pd.DataFrame()
     base = comparativo_incumplimientos[["ID_Asesor", "ID_Periodo", "IGC_Indice_Real", "LIMRA_Indice_Real"]].copy()
@@ -155,6 +156,34 @@ def calcular_indice_salud_negocio(comparativo_incumplimientos: pd.DataFrame,
         base["Prima_Vida"] = comparativo_incumplimientos["Prima_PorConservar_Total"]
     else:
         base["Prima_Vida"] = np.nan
+
+    # --- Polizas Pagadas (Excel mensual, FUENTE PRIORITARIA) ---
+    # Sustituye Polizas_Vida/Prima_Vida/Polizas_GMM/Prima_GMM cuando hay dato
+    # de polizas PAGADAS disponible para ese asesor/periodo (combine_first
+    # solo reemplaza NaN, nunca borra un 0 real). El valor aproximado de
+    # arriba (Actividad del ZIP / IGC) queda como respaldo unicamente para
+    # meses que todavia no se hayan reprocesado con el Excel nuevo -- no se
+    # elimina esa logica, solo pierde prioridad.
+    base["Recibo_Inicial_Vida"], base["Recibo_Ordinario_Vida"] = np.nan, np.nan
+    base["Recibo_Inicial_GMM"], base["Recibo_Ordinario_GMM"] = np.nan, np.nan
+    if historico_polizas_pagadas is not None and not historico_polizas_pagadas.empty:
+        for producto, col_polizas, col_prima, col_ri, col_ro in (
+            ("Vida", "Polizas_Vida", "Prima_Vida", "Recibo_Inicial_Vida", "Recibo_Ordinario_Vida"),
+            ("GMM", "Polizas_GMM", "Prima_GMM", "Recibo_Inicial_GMM", "Recibo_Ordinario_GMM"),
+        ):
+            pagadas = historico_polizas_pagadas[historico_polizas_pagadas["Producto"] == producto][
+                ["ID_Asesor", "ID_Periodo", "Polizas_Pagadas", "Prima_Pagada_Total",
+                 "Recibo_Inicial", "Recibo_Ordinario"]
+            ].rename(columns={
+                "Polizas_Pagadas": "_polizas_pagadas", "Prima_Pagada_Total": "_prima_pagada",
+                "Recibo_Inicial": "_recibo_inicial", "Recibo_Ordinario": "_recibo_ordinario",
+            })
+            base = base.merge(pagadas, on=["ID_Asesor", "ID_Periodo"], how="left")
+            base[col_polizas] = base["_polizas_pagadas"].combine_first(base[col_polizas])
+            base[col_prima] = base["_prima_pagada"].combine_first(base[col_prima])
+            base[col_ri] = base["_recibo_inicial"]
+            base[col_ro] = base["_recibo_ordinario"]
+            base = base.drop(columns=["_polizas_pagadas", "_prima_pagada", "_recibo_inicial", "_recibo_ordinario"])
 
     if base.dropna(subset=["IGC_Indice_Real", "LIMRA_Indice_Real"], how="all").empty:
         return pd.DataFrame()
@@ -194,7 +223,9 @@ def calcular_indice_salud_negocio(comparativo_incumplimientos: pd.DataFrame,
                 "Indice_Salud_Negocio": indice,
                 "Segmento": _lectura_final(indice) if indice is not None else "Datos insuficientes",
                 "LIMRA_Excluido_Sin_Produccion": r["LIMRA_Excluido_Sin_Produccion"],
-                "IGC_Excluido_Sin_Produccion": r["IGC_Excluido_Sin_Produccion"]}
+                "IGC_Excluido_Sin_Produccion": r["IGC_Excluido_Sin_Produccion"],
+                "Recibo_Inicial_Vida": r["Recibo_Inicial_Vida"], "Recibo_Ordinario_Vida": r["Recibo_Ordinario_Vida"],
+                "Recibo_Inicial_GMM": r["Recibo_Inicial_GMM"], "Recibo_Ordinario_GMM": r["Recibo_Ordinario_GMM"]}
         for v, n in niveles.items():
             fila[f"Nivel_{v}"] = n or "No evaluable"
             # Puntaje/Puntos por variable -- nunca se usaban fuera de esta
@@ -233,8 +264,10 @@ def calcular_indice_salud_negocio(comparativo_incumplimientos: pd.DataFrame,
 
 # Se conserva el nombre de funcion anterior como alias, para no romper
 # el resto del sistema que ya la importa con este nombre.
-def calcular_segmentacion_asesores(comparativo_incumplimientos, historico_gmm, historico_actividad):
-    return calcular_indice_salud_negocio(comparativo_incumplimientos, historico_gmm, historico_actividad)
+def calcular_segmentacion_asesores(comparativo_incumplimientos, historico_gmm, historico_actividad,
+                                    historico_polizas_pagadas=None):
+    return calcular_indice_salud_negocio(comparativo_incumplimientos, historico_gmm, historico_actividad,
+                                          historico_polizas_pagadas)
 
 
 # ---------------------------------------------------------------------------
@@ -355,13 +388,24 @@ def calcular_roi_campanas(resumen_bonos: pd.DataFrame, id_periodo: str, costo_ca
 # Real vs. Plan -- meta anual confirmada por el director (300/18)
 # ---------------------------------------------------------------------------
 
-def calcular_real_vs_plan(historico_actividad: pd.DataFrame, dim_asesor: pd.DataFrame, id_periodo: str) -> pd.DataFrame:
+def calcular_real_vs_plan(historico_actividad: pd.DataFrame, dim_asesor: pd.DataFrame, id_periodo: str,
+                           historico_polizas_pagadas: pd.DataFrame = None) -> pd.DataFrame:
     mes_num = int(id_periodo[4:6])
     meta_polizas = round(META_ANUAL_POLIZAS_VIDA / 12 * mes_num, 1)
     meta_asesores = round(META_ANUAL_ASESORES_NUEVOS / 12 * mes_num, 1)
 
+    # Polizas Pagadas (Excel mensual) es la fuente PRIORITARIA -- si hay dato
+    # para este periodo, sustituye la suma de Historico_Actividad (emitidas).
     polizas_reales = 0
-    if historico_actividad is not None and not historico_actividad.empty:
+    tiene_pagadas = False
+    if historico_polizas_pagadas is not None and not historico_polizas_pagadas.empty:
+        sub_pagadas = historico_polizas_pagadas[
+            (historico_polizas_pagadas["ID_Periodo"] == id_periodo) &
+            (historico_polizas_pagadas["Producto"] == "Vida")]
+        if len(sub_pagadas):
+            polizas_reales = sub_pagadas["Polizas_Pagadas"].sum()
+            tiene_pagadas = True
+    if not tiene_pagadas and historico_actividad is not None and not historico_actividad.empty:
         sub = historico_actividad[historico_actividad["ID_Periodo"] == id_periodo]
         if len(sub):
             polizas_reales = sub["Polizas_Vida"].sum()

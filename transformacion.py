@@ -15,6 +15,7 @@ from config import (
     COLUMNAS_DIM_ASESOR, COLUMNAS_DIM_PROMOTOR, COLUMNAS_DIM_PERIODO,
     COLUMNAS_HISTORICO_ACTIVIDAD, COLUMNAS_RESUMEN_BONOS, MESES_ES,
     COLUMNAS_HISTORICO_GMM, COLUMNAS_HISTORICO_TRASPASOS, COLUMNAS_HISTORICO_CONEXION_DESARROLLO,
+    COLUMNAS_HISTORICO_POLIZAS_PAGADAS,
 )
 
 
@@ -27,6 +28,20 @@ def construir_historico_gmm(tabla_gmm: pd.DataFrame, id_periodo: str) -> pd.Data
         "Primas_Iniciales_Mes": "sum", "Primas_Renovacion_Mes": "sum", "Polizas_Mes": "sum",
     })
     return df[COLUMNAS_HISTORICO_GMM]
+
+
+def construir_historico_polizas_pagadas(tabla_polizas_pagadas: pd.DataFrame, id_periodo: str) -> pd.DataFrame:
+    """Consolida el Excel de Polizas Pagadas (Vida y GMM) -- un renglon por
+    Periodo + Asesor + Producto, igual patron que construir_historico_gmm."""
+    if tabla_polizas_pagadas is None or tabla_polizas_pagadas.empty:
+        return pd.DataFrame(columns=COLUMNAS_HISTORICO_POLIZAS_PAGADAS)
+    df = tabla_polizas_pagadas.copy()
+    df["ID_Periodo"] = id_periodo
+    df = df.groupby(["ID_Periodo", "ID_Asesor", "Producto"], as_index=False).agg({
+        "Nombre_Asesor": "first", "Polizas_Pagadas": "sum", "Recibo_Inicial": "sum",
+        "Recibo_Ordinario": "sum", "Prima_Pagada_Total": "sum",
+    })
+    return df[COLUMNAS_HISTORICO_POLIZAS_PAGADAS]
 
 
 def construir_historico_traspasos(tabla_traspasos: pd.DataFrame, id_periodo: str) -> pd.DataFrame:

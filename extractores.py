@@ -277,6 +277,77 @@ def _buscar_texto(texto: str, patron: str, default: str = "") -> str:
 
 
 # ---------------------------------------------------------------------------
+# Extractor: Excel mensual de Polizas Pagadas (Vida y GMM) -- NO es un PDF del
+# ZIP, es un Excel independiente que Yakol comparte por separado. Fuente
+# prioritaria de produccion (polizas PAGADAS, no emitidas) y primaje real.
+# ---------------------------------------------------------------------------
+
+def _normalizar_columna(nombre) -> str:
+    """Quita acentos/caracteres no-ascii y normaliza espacios, para poder
+    comparar nombres de columna aunque el archivo tenga el encoding roto
+    (ej. 'P�lizas' en vez de 'Polizas') -- se compara contra objetivos
+    que ya pasaron por la misma normalizacion."""
+    s = re.sub(r"\s+", " ", str(nombre).strip().lower())
+    return "".join(c for c in s if ord(c) < 128)
+
+
+def _detectar_fila_encabezado(df_crudo: pd.DataFrame) -> int:
+    """Algunas hojas (ej. VIDA) traen una fila de titulo extra antes del
+    encabezado real -- se busca la primera fila que contenga una celda que
+    normalice a 'asesor', en vez de asumir que el encabezado es la fila 0."""
+    for i in range(min(5, len(df_crudo))):
+        valores = [_normalizar_columna(v) for v in df_crudo.iloc[i].tolist()]
+        if "asesor" in valores:
+            return i
+    return 0
+
+
+_COLUMNAS_OBJETIVO_POLIZAS_PAGADAS = {
+    "asesor": "ID_Asesor", "nombre asesor": "Nombre_Asesor", "plizas": "Polizas_Pagadas",
+    "recibo inicial": "Recibo_Inicial", "recibo ordinario": "Recibo_Ordinario",
+    "total prima inicial": "Prima_Pagada_Total",
+}
+
+
+def extraer_polizas_pagadas(ruta_excel: str) -> pd.DataFrame:
+    """Lee las hojas 'VIDA' y 'GMM' del Excel mensual de Polizas Pagadas y
+    regresa un solo DataFrame combinado con columna Producto ('Vida'/'GMM').
+    Fecha de Conexion, Grupo y Sucursal se leen implicitamente pero se
+    descartan -- no se necesitan para ningun calculo del sistema."""
+    columnas_finales = ["ID_Asesor", "Nombre_Asesor", "Polizas_Pagadas",
+                         "Recibo_Inicial", "Recibo_Ordinario", "Prima_Pagada_Total"]
+    partes = []
+    for nombre_hoja, producto in (("VIDA", "Vida"), ("GMM", "GMM")):
+        try:
+            crudo = pd.read_excel(ruta_excel, sheet_name=nombre_hoja, header=None)
+        except ValueError:
+            continue  # la hoja no existe en este archivo
+        fila_encabezado = _detectar_fila_encabezado(crudo)
+        df = pd.read_excel(ruta_excel, sheet_name=nombre_hoja, header=fila_encabezado)
+
+        mapeo = {col: _COLUMNAS_OBJETIVO_POLIZAS_PAGADAS[_normalizar_columna(col)]
+                 for col in df.columns if _normalizar_columna(col) in _COLUMNAS_OBJETIVO_POLIZAS_PAGADAS}
+        df = df.rename(columns=mapeo)
+        for c in columnas_finales:
+            if c not in df.columns:
+                df[c] = None
+        df = df[columnas_finales].copy()
+
+        df = df[df["ID_Asesor"].notna()]
+        df["ID_Asesor"] = df["ID_Asesor"].apply(
+            lambda v: str(int(v)) if isinstance(v, (int, float)) and not pd.isna(v) else str(v).strip())
+        df = df[df["ID_Asesor"].str.fullmatch(r"\d{4,6}")]
+        for c in ["Polizas_Pagadas", "Recibo_Inicial", "Recibo_Ordinario", "Prima_Pagada_Total"]:
+            df[c] = pd.to_numeric(df[c], errors="coerce")
+        df["Producto"] = producto
+        partes.append(df)
+
+    if not partes:
+        return pd.DataFrame(columns=columnas_finales + ["Producto"])
+    return pd.concat(partes, ignore_index=True)
+
+
+# ---------------------------------------------------------------------------
 # Registro central: tipo de reporte -> funcion extractora
 # ---------------------------------------------------------------------------
 

@@ -75,6 +75,17 @@ COLUMNAS_HISTORICO_CONEXION_DESARROLLO = [
     "ID_Periodo", "ID_Asesor", "Mes_Num", "Polizas_Del_Mes", "Cumple_Polizas", "Bono_A_Pagar",
 ]
 
+# Excel mensual de Polizas Pagadas (Vida y GMM) -- fuente PRIORITARIA de produccion,
+# distinta del reporte "Actividad" del ZIP: Actividad mide polizas EMITIDAS (Cuaderno de
+# Concursos), este Excel mide polizas PAGADAS con su primaje real. Cuando esta
+# disponible para un asesor/periodo, tiene prioridad sobre la aproximacion anterior en
+# todo el sistema (Indice de Salud, Destacados, Riesgo, Real vs Plan) -- ver
+# calcular_indice_salud_negocio() y calcular_real_vs_plan() en analitica_avanzada.py.
+COLUMNAS_HISTORICO_POLIZAS_PAGADAS = [
+    "ID_Periodo", "ID_Asesor", "Nombre_Asesor", "Producto",
+    "Polizas_Pagadas", "Recibo_Inicial", "Recibo_Ordinario", "Prima_Pagada_Total",
+]
+
 # ---------------------------------------------------------------------------
 # Modulos analiticos -- constantes de negocio (no relacionadas con bonos
 # oficiales, que nunca se recalculan)
