@@ -209,12 +209,22 @@ def calcular_indice_salud_negocio(comparativo_incumplimientos: pd.DataFrame,
             "LIMRA": None if r["LIMRA_Excluido_Sin_Produccion"] else _nivel_limra(r["LIMRA_Indice_Real"]),
             "IGC": None if r["IGC_Excluido_Sin_Produccion"] else _nivel_igc(r["IGC_Indice_Real"]),
         }
+        # Formula fija: Indice = Suma(peso_v * puntaje_v) / 100, SIEMPRE
+        # dividido entre el 100% completo -- una variable sin dato aporta 0
+        # puntos (no se excluye ni se redistribuye el peso). Decision
+        # explicita del usuario (confirmada tras revisar el caso real de
+        # Rosadely Rodriguez, 59308): antes se excluian las variables sin
+        # dato del promedio; ahora cuentan como el peor resultado posible.
+        # Excepcion: si NINGUNA variable tiene dato, no se reporta un
+        # indice de 0 (Riesgo Alto) por falta de informacion -- se marca
+        # "Datos insuficientes", ya que no se evaluo nada en absoluto.
         peso_disponible = sum(PESOS_INDICE_SALUD[v] for v, n in niveles.items() if n is not None)
         if peso_disponible == 0:
             indice = None
         else:
-            suma = sum(PESOS_INDICE_SALUD[v] * PUNTAJE_POR_NIVEL[n] for v, n in niveles.items() if n is not None)
-            indice = round(suma / peso_disponible, 2)
+            suma_total = sum(PESOS_INDICE_SALUD[v] * (PUNTAJE_POR_NIVEL[n] if n is not None else 0)
+                              for v, n in niveles.items())
+            indice = round(suma_total / 100, 2)
 
         fila = {"ID_Asesor": r["ID_Asesor"], "ID_Periodo": r["ID_Periodo"],
                 "Polizas_Vida": r["Polizas_Vida"], "Prima_Vida": r["Prima_Vida"],
@@ -228,14 +238,15 @@ def calcular_indice_salud_negocio(comparativo_incumplimientos: pd.DataFrame,
                 "Recibo_Inicial_GMM": r["Recibo_Inicial_GMM"], "Recibo_Ordinario_GMM": r["Recibo_Ordinario_GMM"]}
         for v, n in niveles.items():
             fila[f"Nivel_{v}"] = n or "No evaluable"
-            # Puntaje/Puntos por variable -- nunca se usaban fuera de esta
-            # funcion, se exponen aqui para que la interfaz pueda mostrar el
-            # desglose completo (por que un asesor llego a su Indice de
-            # Salud) sin recalcular nada. Puntos_{v} = peso% x puntaje/100 --
-            # la suma de los 6 Puntos_* de un asesor sin variables faltantes
-            # da exactamente su Indice_Salud_Negocio.
+            # Puntaje/Puntos por variable -- se exponen aqui para que la
+            # interfaz pueda mostrar el desglose completo (por que un asesor
+            # llego a su Indice de Salud) sin recalcular nada. Puntos_{v} =
+            # peso% x puntaje/100, SIEMPRE (0 si la variable no tiene dato,
+            # consistente con la formula fija de arriba) -- la suma de los 6
+            # Puntos_* de un asesor da exactamente su Indice_Salud_Negocio
+            # (salvo el caso "Datos insuficientes", donde el indice es None).
             fila[f"Puntaje_{v}"] = PUNTAJE_POR_NIVEL[n] if n is not None else None
-            fila[f"Puntos_{v}"] = round(PESOS_INDICE_SALUD[v] * PUNTAJE_POR_NIVEL[n] / 100, 2) if n is not None else None
+            fila[f"Puntos_{v}"] = round(PESOS_INDICE_SALUD[v] * PUNTAJE_POR_NIVEL[n] / 100, 2) if n is not None else 0.0
         filas.append(fila)
 
     resultado = pd.DataFrame(filas)
