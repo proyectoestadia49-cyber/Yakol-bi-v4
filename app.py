@@ -46,11 +46,12 @@ from graficas import (
     grafica_tendencia_igc_limra, grafica_bono_total_mensual, grafica_composicion_bonos,
     grafica_segmentacion, grafica_real_vs_plan, grafica_flujo_simplificado, gauge_semaforo,
     grafica_destacados_dispersion, interpretacion_destacados_dispersion,
+    grafica_contribucion_variables, interpretacion_contribucion_variables,
     interpretacion_tendencia_igc_limra, interpretacion_bono_total_mensual,
     interpretacion_composicion_bonos, interpretacion_segmentacion,
     interpretacion_real_vs_plan, interpretacion_flujo,
 )
-from config_visual import CSS_CORPORATIVO, COLOR_PRIMARIO
+from config_visual import CSS_CORPORATIVO, COLOR_PRIMARIO, NIVEL_COLOR, PALETA_SEGMENTOS, COLOR_NEUTRO
 from config import (
     TIPOS_REPORTE_ESPERADOS, SUELDO_SHARON_DEFAULT, PCT_SHARON_RECLUTAMIENTO_DEFAULT,
     CANALES_RECLUTAMIENTO, UMBRAL_LIMRA, UMBRAL_IGC,
@@ -277,7 +278,9 @@ if procesar and archivo_zip is not None:
 if "datos" in st.session_state:
     d = st.session_state["datos"]
 
-    tab1, tab2, tab3 = st.tabs(["Dashboard Financiero", "Resultados y Recomendaciones", "Exportacion a Excel"])
+    tab1, tab2, tab3, tab4 = st.tabs([
+        "Dashboard Financiero", "Resultados y Recomendaciones", "Salud del Asesor", "Exportacion a Excel",
+    ])
 
     # -------------------------------------------------------------------
     # TAB 1 -- DASHBOARD FINANCIERO
@@ -515,9 +518,135 @@ if "datos" in st.session_state:
             st.info("Se necesitan al menos 3 meses de historico para proyectar el siguiente periodo.")
 
     # -------------------------------------------------------------------
-    # TAB 3 -- EXPORTACION A EXCEL
+    # TAB 3 -- SALUD DEL ASESOR (transparencia del Indice de Salud del Negocio)
     # -------------------------------------------------------------------
     with tab3:
+        st.markdown('<div class="seccion-titulo">Salud del Asesor -- Desglose Completo del Indice de Salud del Negocio</div>',
+                    unsafe_allow_html=True)
+        seg_salud = d["segmentacion"]
+        if seg_salud is None or seg_salud.empty or "Indice_Salud_Negocio" not in seg_salud.columns:
+            st.info("Aun no hay suficiente informacion procesada para mostrar este desglose.")
+        else:
+            nombres_periodo = {}
+            if d["comparativo"] is not None and not d["comparativo"].empty:
+                nombres_periodo = d["comparativo"].drop_duplicates(["ID_Asesor", "ID_Periodo"]) \
+                    .set_index(["ID_Asesor", "ID_Periodo"])["Nombre_Asesor"].to_dict()
+
+            periodos_disponibles = sorted(seg_salud["ID_Periodo"].unique(), reverse=True)
+            periodo_sel = st.selectbox("Periodo a revisar", periodos_disponibles, index=0)
+
+            sub_periodo = seg_salud[seg_salud["ID_Periodo"] == periodo_sel].copy()
+            sub_periodo["Nombre_Asesor"] = sub_periodo.apply(
+                lambda r: nombres_periodo.get((r["ID_Asesor"], periodo_sel), f"Asesor {r['ID_Asesor']}"), axis=1)
+
+            promedio_grupo = sub_periodo["Indice_Salud_Negocio"].mean(skipna=True)
+            n_banda_alta = sub_periodo["Segmento"].isin(["Alto desempeno", "Negocio extraordinario"]).sum()
+
+            colA, colB, colC = st.columns(3)
+            with colA:
+                st.markdown(f'''<div class="kpi-card"><div class="kpi-label">Asesores Evaluados</div>
+                            <div class="kpi-value">{sub_periodo["ID_Asesor"].nunique()}</div></div>''', unsafe_allow_html=True)
+            with colB:
+                valor_promedio = f"{promedio_grupo:.1f}" if pd.notna(promedio_grupo) else "N/D"
+                st.markdown(f'''<div class="kpi-card"><div class="kpi-label">Indice de Salud Promedio del Grupo</div>
+                            <div class="kpi-value">{valor_promedio}</div></div>''', unsafe_allow_html=True)
+            with colC:
+                st.markdown(f'''<div class="kpi-card exito"><div class="kpi-label">En Banda Alta o Superior</div>
+                            <div class="kpi-value">{int(n_banda_alta)}</div></div>''', unsafe_allow_html=True)
+
+            st.markdown('<div class="seccion-titulo">Tabla Completa de Asesores Evaluados</div>', unsafe_allow_html=True)
+            busqueda_salud = st.text_input("Buscar asesor por nombre", key="busqueda_salud")
+            tabla_salud = sub_periodo.copy()
+            if busqueda_salud:
+                tabla_salud = tabla_salud[tabla_salud["Nombre_Asesor"].str.contains(busqueda_salud, case=False, na=False)]
+            tabla_mostrar_salud = tabla_salud[[
+                "ID_Asesor", "Nombre_Asesor", "Polizas_Vida", "Prima_Vida", "Polizas_GMM", "Prima_GMM",
+                "LIMRA_Indice_Real", "IGC_Indice_Real", "Indice_Salud_Negocio", "Segmento",
+            ]].copy()
+            tabla_mostrar_salud.columns = [
+                "Numero de Asesor", "Nombre del Asesor", "Polizas Vida", "Prima Vida", "Polizas GMM", "Prima GMM",
+                "LIMRA (%)", "IGC (%)", "Indice de Salud", "Estatus Integral",
+            ]
+            st.dataframe(
+                tabla_mostrar_salud.sort_values("Indice de Salud", ascending=False),
+                use_container_width=True, hide_index=True, height=420,
+                column_config={
+                    "Numero de Asesor": st.column_config.TextColumn(width="small"),
+                    "Nombre del Asesor": st.column_config.TextColumn(width="medium"),
+                    "Prima Vida": st.column_config.NumberColumn(format="$%.0f"),
+                    "Prima GMM": st.column_config.NumberColumn(format="$%.0f"),
+                    "LIMRA (%)": st.column_config.NumberColumn(format="%.2f%%"),
+                    "IGC (%)": st.column_config.NumberColumn(format="%.2f%%"),
+                    "Indice de Salud": st.column_config.NumberColumn(format="%.1f"),
+                },
+            )
+
+            st.markdown('<div class="seccion-titulo">Desglose Individual por Asesor</div>', unsafe_allow_html=True)
+            opciones_asesor = sub_periodo.sort_values("Nombre_Asesor")[["ID_Asesor", "Nombre_Asesor"]].drop_duplicates()
+            opciones_dict = {f'{r["Nombre_Asesor"]} ({r["ID_Asesor"]})': r["ID_Asesor"] for _, r in opciones_asesor.iterrows()}
+            if not opciones_dict:
+                st.info("No hay asesores evaluados en este periodo.")
+            else:
+                seleccion_label = st.selectbox("Ver desglose de:", list(opciones_dict.keys()))
+                id_sel = opciones_dict[seleccion_label]
+                fila_sel = sub_periodo[sub_periodo["ID_Asesor"] == id_sel].iloc[0]
+
+                indice_val = fila_sel["Indice_Salud_Negocio"]
+                segmento_val = fila_sel["Segmento"]
+                color_badge = PALETA_SEGMENTOS.get(segmento_val, COLOR_NEUTRO)
+                indice_txt = f"{indice_val:.1f}" if pd.notna(indice_val) else "N/D"
+
+                st.markdown(f'''<div class="estatus-integral-banner">
+                    <div>
+                        <div class="eib-nombre">{fila_sel["Nombre_Asesor"]} -- Asesor {fila_sel["ID_Asesor"]}</div>
+                        <div class="eib-sub">Periodo {periodo_sel}</div>
+                        <span class="eib-badge" style="background-color:{color_badge};">{segmento_val}</span>
+                    </div>
+                    <div>
+                        <div class="eib-indice">{indice_txt}</div>
+                        <div class="eib-indice-label">Indice de Salud del Negocio</div>
+                    </div>
+                    </div>''', unsafe_allow_html=True)
+
+                if fila_sel.get("Regla_de_Control_Aplicada") == "Si -- ver Polizas_Vida/LIMRA/IGC":
+                    st.warning("Este estatus fue limitado por una regla de control (cero produccion de Vida, o "
+                               "deterioro severo en LIMRA/IGC) -- el promedio ponderado numerico pudo haber sido "
+                               "mas alto, pero la regla de control de la promotoria tiene prioridad.")
+
+                variables_info = [
+                    ("Polizas_Vida", "Polizas Vida", "Polizas_Vida", lambda v: f"{v:.0f}" if pd.notna(v) else "N/D"),
+                    ("Prima_Vida", "Prima Vida", "Prima_Vida", lambda v: f"${v:,.0f}" if pd.notna(v) else "N/D"),
+                    ("Polizas_GMM", "Polizas GMM", "Polizas_GMM", lambda v: f"{v:.0f}" if pd.notna(v) else "N/D"),
+                    ("Prima_GMM", "Prima GMM", "Prima_GMM", lambda v: f"${v:,.0f}" if pd.notna(v) else "N/D"),
+                    ("LIMRA", "LIMRA", "LIMRA_Indice_Real", lambda v: f"{v:.2f}%" if pd.notna(v) else "N/D"),
+                    ("IGC", "IGC", "IGC_Indice_Real", lambda v: f"{v:.2f}%" if pd.notna(v) else "N/D"),
+                ]
+                tarjetas_html = ""
+                for clave, etiqueta, columna_valor, fmt in variables_info:
+                    valor_raw = fila_sel.get(columna_valor)
+                    nivel = fila_sel.get(f"Nivel_{clave}", "No evaluable")
+                    puntaje = fila_sel.get(f"Puntaje_{clave}")
+                    puntos = fila_sel.get(f"Puntos_{clave}")
+                    color_nivel = NIVEL_COLOR.get(nivel, COLOR_NEUTRO)
+                    puntaje_txt = f"{puntaje:.0f}" if puntaje is not None and pd.notna(puntaje) else "N/D"
+                    puntos_txt = f"{puntos:.1f} pts aportados" if puntos is not None and pd.notna(puntos) else "No evaluable este periodo"
+                    tarjetas_html += f'''<div class="variable-card" style="border-top-color:{color_nivel};">
+                        <div class="vc-nombre">{etiqueta}</div>
+                        <div class="vc-valor">{fmt(valor_raw)}</div>
+                        <div class="vc-nivel" style="background-color:{color_nivel};">{nivel}</div>
+                        <div class="vc-puntos">Puntaje {puntaje_txt} -- {puntos_txt}</div>
+                        </div>'''
+                st.markdown(f'<div class="variable-card-grid">{tarjetas_html}</div>', unsafe_allow_html=True)
+
+                st.plotly_chart(grafica_contribucion_variables(fila_sel), use_container_width=True)
+                st.markdown(
+                    f'<div class="interpretacion-box"><b>INTERPRETACION</b><br>'
+                    f'{interpretacion_contribucion_variables(fila_sel)}</div>', unsafe_allow_html=True)
+
+    # -------------------------------------------------------------------
+    # TAB 4 -- EXPORTACION A EXCEL
+    # -------------------------------------------------------------------
+    with tab4:
         st.markdown('<div class="seccion-titulo">Descargar Excel Maestro Completo</div>', unsafe_allow_html=True)
         st.write("Incluye las 24 hojas: bonos oficiales, cumplimiento, segmentacion, costeo, "
                  "escenarios, proyecciones y el historico completo acumulado.")

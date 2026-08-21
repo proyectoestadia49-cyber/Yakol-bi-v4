@@ -197,6 +197,14 @@ def calcular_indice_salud_negocio(comparativo_incumplimientos: pd.DataFrame,
                 "IGC_Excluido_Sin_Produccion": r["IGC_Excluido_Sin_Produccion"]}
         for v, n in niveles.items():
             fila[f"Nivel_{v}"] = n or "No evaluable"
+            # Puntaje/Puntos por variable -- nunca se usaban fuera de esta
+            # funcion, se exponen aqui para que la interfaz pueda mostrar el
+            # desglose completo (por que un asesor llego a su Indice de
+            # Salud) sin recalcular nada. Puntos_{v} = peso% x puntaje/100 --
+            # la suma de los 6 Puntos_* de un asesor sin variables faltantes
+            # da exactamente su Indice_Salud_Negocio.
+            fila[f"Puntaje_{v}"] = PUNTAJE_POR_NIVEL[n] if n is not None else None
+            fila[f"Puntos_{v}"] = round(PESOS_INDICE_SALUD[v] * PUNTAJE_POR_NIVEL[n] / 100, 2) if n is not None else None
         filas.append(fila)
 
     resultado = pd.DataFrame(filas)

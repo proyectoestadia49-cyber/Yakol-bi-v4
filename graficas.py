@@ -13,10 +13,16 @@ import pandas as pd
 
 from config_visual import (
     COLOR_PRIMARIO, COLOR_SECUNDARIO, COLOR_ACENTO, COLOR_EXITO,
-    COLOR_ADVERTENCIA, COLOR_PELIGRO, COLOR_NEUTRO, PALETA_SEGMENTOS,
+    COLOR_ADVERTENCIA, COLOR_PELIGRO, COLOR_NEUTRO, PALETA_SEGMENTOS, NIVEL_COLOR,
     FUENTE, PLANTILLA_PLOTLY,
 )
 from config import UMBRAL_LIMRA, UMBRAL_IGC
+
+_ETIQUETAS_VARIABLE = {
+    "Polizas_Vida": "Polizas Vida", "Prima_Vida": "Prima Vida",
+    "Polizas_GMM": "Polizas GMM", "Prima_GMM": "Prima GMM",
+    "LIMRA": "LIMRA", "IGC": "IGC",
+}
 
 
 def _figura_vacia(mensaje):
@@ -368,6 +374,59 @@ def interpretacion_destacados_dispersion(destacados: pd.DataFrame) -> str:
             f"{lider['Promedio_Indice_Salud']:.1f} en el Indice de Salud del Negocio durante "
             f"{lider['Periodos_Evaluados']} periodo(s), con {lider['Consistencia_Pct']:.0f}% del "
             f"tiempo en banda alta.")
+
+
+def grafica_contribucion_variables(fila_asesor: pd.Series):
+    """Barra horizontal con los puntos que cada una de las 6 variables del
+    Indice de Salud del Negocio aporto al resultado final de un asesor
+    especifico (columnas Puntos_* de Segmentacion_Asesores). Coloreada por
+    el nivel alcanzado en cada variable -- nunca recalcula nada, solo
+    visualiza lo que analitica_avanzada.py ya calculo."""
+    variables = list(_ETIQUETAS_VARIABLE.keys())
+    puntos = [fila_asesor.get(f"Puntos_{v}") for v in variables]
+    niveles = [fila_asesor.get(f"Nivel_{v}", "No evaluable") for v in variables]
+    etiquetas = [_ETIQUETAS_VARIABLE[v] for v in variables]
+
+    disponibles = [(e, p, n) for e, p, n in zip(etiquetas, puntos, niveles) if pd.notna(p)]
+    if not disponibles:
+        return _figura_vacia("Sin datos suficientes para este asesor todavia.")
+    etiquetas_d, puntos_d, niveles_d = zip(*disponibles)
+    colores = [NIVEL_COLOR.get(n, COLOR_NEUTRO) for n in niveles_d]
+
+    orden = sorted(range(len(puntos_d)), key=lambda i: puntos_d[i])
+    etiquetas_o = [etiquetas_d[i] for i in orden]
+    puntos_o = [puntos_d[i] for i in orden]
+    colores_o = [colores[i] for i in orden]
+    niveles_o = [niveles_d[i] for i in orden]
+
+    fig = go.Figure(go.Bar(
+        x=puntos_o, y=etiquetas_o, orientation="h", marker_color=colores_o,
+        text=[f"{p:.1f} pts ({n})" for p, n in zip(puntos_o, niveles_o)], textposition="outside",
+    ))
+    fig.update_layout(
+        title={"text": "PUNTOS APORTADOS AL INDICE DE SALUD, POR VARIABLE",
+               "font": {"size": 12.5, "color": COLOR_PRIMARIO}, "x": 0, "xanchor": "left"},
+        template=PLANTILLA_PLOTLY, height=320, font_family=FUENTE,
+        margin=dict(l=10, r=10, t=50, b=10), xaxis_title="Puntos aportados (de 25 / 15 / 10 maximos segun el peso)",
+        showlegend=False)
+    return fig
+
+
+def interpretacion_contribucion_variables(fila_asesor: pd.Series) -> str:
+    variables = list(_ETIQUETAS_VARIABLE.keys())
+    pares = [(v, fila_asesor.get(f"Puntos_{v}"), fila_asesor.get(f"Nivel_{v}", "No evaluable"))
+             for v in variables if pd.notna(fila_asesor.get(f"Puntos_{v}"))]
+    if not pares:
+        return "Sin datos suficientes para explicar la contribucion por variable todavia."
+    mejor = max(pares, key=lambda p: p[1])
+    peor = min(pares, key=lambda p: p[1])
+    nombre = fila_asesor.get("Nombre_Asesor") or f"Asesor {fila_asesor.get('ID_Asesor', '')}"
+    texto = (f"La variable que mas aporto al Indice de Salud de {nombre} fue "
+             f"{_ETIQUETAS_VARIABLE[mejor[0]]} ({mejor[1]:.1f} puntos, nivel {mejor[2]}).")
+    if peor[0] != mejor[0]:
+        texto += (f" La que menos aporto fue {_ETIQUETAS_VARIABLE[peor[0]]} "
+                  f"({peor[1]:.1f} puntos, nivel {peor[2]}).")
+    return texto
 
 
 def gauge_semaforo(valor, titulo, umbral_bajo, umbral_alto, invertido=False):

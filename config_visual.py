@@ -29,6 +29,22 @@ PALETA_SEGMENTOS = {
     "Datos insuficientes para segmentar": COLOR_NEUTRO,
 }
 
+# Color por nivel de variable individual (Nivel_Polizas_Vida, Nivel_LIMRA, etc. en
+# Segmentacion_Asesores) -- rampa ordenada de mejor a peor, reutilizando la misma
+# familia de colores corporativos ya definida arriba. COLOR_BUENO es la unica
+# variante nueva: un verde mas claro que COLOR_EXITO, para diferenciar
+# "Extraordinario" de "Bueno" sin salirse de la paleta verde ya establecida.
+COLOR_BUENO = "#4FA37B"
+NIVEL_COLOR = {
+    "Extraordinario": COLOR_EXITO,
+    "Bueno": COLOR_BUENO,
+    "Promedio": COLOR_ACENTO,
+    "Proactivo": COLOR_DESARROLLO,
+    "Riesgo Medio": COLOR_ADVERTENCIA,
+    "Riesgo Alto": COLOR_PELIGRO,
+    "No evaluable": COLOR_NEUTRO,
+}
+
 FUENTE = "Segoe UI, -apple-system, sans-serif"
 PLANTILLA_PLOTLY = "plotly_white"
 
@@ -117,6 +133,40 @@ CSS_CORPORATIVO = f"""
         border-radius: 10px; margin-left: 8px; color: white; vertical-align: middle;
         background-color: {COLOR_EXITO};
     }}
+
+    .estatus-integral-banner {{
+        background: linear-gradient(135deg, {COLOR_PRIMARIO} 0%, #123A63 100%);
+        border-radius: 14px; padding: 22px 28px; margin-bottom: 18px;
+        display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 14px;
+        box-shadow: 0 4px 14px rgba(11,42,74,0.2);
+    }}
+    .estatus-integral-banner .eib-nombre {{ color: white; font-size: 17px; font-weight: 700; margin: 0; }}
+    .estatus-integral-banner .eib-sub {{ color: #C9D9EA; font-size: 12.5px; margin-top: 2px; }}
+    .estatus-integral-banner .eib-indice {{ color: white; font-size: 38px; font-weight: 800; line-height: 1; text-align: right; }}
+    .estatus-integral-banner .eib-indice-label {{ color: #C9D9EA; font-size: 11px; text-transform: uppercase; letter-spacing: 0.06em; text-align: right; }}
+    .estatus-integral-banner .eib-badge {{
+        display: inline-block; padding: 5px 14px; border-radius: 20px; font-weight: 700;
+        font-size: 12.5px; color: white; margin-top: 4px;
+    }}
+
+    .variable-card-grid {{
+        display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+        gap: 10px; margin-bottom: 18px;
+    }}
+    .variable-card {{
+        background: {COLOR_TARJETA}; border-radius: 10px; padding: 12px 14px;
+        box-shadow: 0 1px 6px rgba(11,42,74,0.06); border-top: 4px solid {COLOR_NEUTRO};
+    }}
+    .variable-card .vc-nombre {{
+        font-size: 11px; color: {COLOR_NEUTRO}; text-transform: uppercase;
+        letter-spacing: 0.05em; font-weight: 600; margin-bottom: 6px;
+    }}
+    .variable-card .vc-valor {{ font-size: 17px; font-weight: 700; color: {COLOR_PRIMARIO}; }}
+    .variable-card .vc-nivel {{
+        display: inline-block; font-size: 10.5px; font-weight: 700; padding: 2px 9px;
+        border-radius: 10px; color: white; margin: 6px 0 4px 0;
+    }}
+    .variable-card .vc-puntos {{ font-size: 11.5px; color: #555; }}
 
     .interpretacion-box {{
         background-color: #F4F7FB; border: 1px solid #E2E8F0; border-left: 4px solid {COLOR_SECUNDARIO};
