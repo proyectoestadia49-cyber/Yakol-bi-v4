@@ -16,6 +16,7 @@ from config_visual import (
     COLOR_ADVERTENCIA, COLOR_PELIGRO, COLOR_NEUTRO, PALETA_SEGMENTOS,
     FUENTE, PLANTILLA_PLOTLY,
 )
+from config import UMBRAL_LIMRA, UMBRAL_IGC
 
 
 def _figura_vacia(mensaje):
@@ -303,6 +304,70 @@ def interpretacion_flujo(resumen_bonos: pd.DataFrame, ingresos_totales: float,
         partes.append(f" El flujo neto simplificado es POSITIVO (${flujo_neto:,.2f}), lo que significa "
                        f"que los ingresos del periodo cubrieron el costo de reclutamiento del mes.")
     return "".join(partes)
+
+
+def grafica_destacados_dispersion(segmentacion: pd.DataFrame, destacados: pd.DataFrame):
+    """Contraparte visual de grafica_segmentacion: en vez de mostrar la
+    distribucion de bandas, posiciona a cada asesor evaluado en un plano de
+    produccion (Polizas de Vida promedio) contra margen de cumplimiento
+    normativo (LIMRA/IGC promedio menos el minimo oficial), resaltando a
+    los que calificaron como destacados."""
+    if segmentacion is None or segmentacion.empty or "Indice_Salud_Negocio" not in segmentacion.columns:
+        return _figura_vacia("Sin datos suficientes todavia.")
+
+    resumen = segmentacion.groupby("ID_Asesor").agg(
+        Produccion_Vida=("Polizas_Vida", "mean"),
+        LIMRA_Prom=("LIMRA_Indice_Real", "mean"),
+        IGC_Prom=("IGC_Indice_Real", "mean"),
+    ).reset_index()
+    resumen = resumen.dropna(subset=["Produccion_Vida"])
+    if resumen.empty:
+        return _figura_vacia("Sin datos suficientes todavia.")
+    resumen["Margen_Cumplimiento"] = ((resumen["LIMRA_Prom"] - UMBRAL_LIMRA) +
+                                       (resumen["IGC_Prom"] - UMBRAL_IGC)) / 2
+
+    ids_destacados = set(destacados["ID_Asesor"]) if destacados is not None and not destacados.empty else set()
+    resumen["Es_Destacado"] = resumen["ID_Asesor"].isin(ids_destacados)
+    resto, top = resumen[~resumen["Es_Destacado"]], resumen[resumen["Es_Destacado"]]
+
+    fig = go.Figure()
+    fig.add_trace(go.Scatter(
+        x=resto["Produccion_Vida"], y=resto["Margen_Cumplimiento"], mode="markers",
+        marker=dict(color=COLOR_NEUTRO, size=9, opacity=0.55),
+        name="Resto de la fuerza de ventas",
+        text=resto["ID_Asesor"], hovertemplate="Asesor %{text}<extra></extra>",
+    ))
+    fig.add_trace(go.Scatter(
+        x=top["Produccion_Vida"], y=top["Margen_Cumplimiento"], mode="markers",
+        marker=dict(color=COLOR_EXITO, size=13, line=dict(width=1.5, color="white")),
+        name="Asesores destacados",
+        text=top["ID_Asesor"], hovertemplate="Asesor %{text}<extra></extra>",
+    ))
+    fig.add_hline(y=0, line_dash="dot", line_color=COLOR_NEUTRO, opacity=0.6,
+                   annotation_text="Margen 0 = justo en el minimo normativo", annotation_position="bottom right",
+                   annotation_font_size=10)
+    fig.update_layout(
+        title={"text": "PRODUCCION PROMEDIO DE VIDA VS. MARGEN DE CUMPLIMIENTO NORMATIVO, POR ASESOR",
+               "font": {"size": 12.5, "color": COLOR_PRIMARIO}, "x": 0, "xanchor": "left", "y": 0.97},
+        template=PLANTILLA_PLOTLY, height=400, font_family=FUENTE,
+        margin=dict(l=10, r=10, t=95, b=10),
+        xaxis_title="Polizas de Vida promedio por periodo", yaxis_title="Margen sobre minimos LIMRA/IGC",
+        legend=dict(orientation="h", yanchor="top", y=0.90, x=0, xanchor="left"))
+    return fig
+
+
+def interpretacion_destacados_dispersion(destacados: pd.DataFrame) -> str:
+    if destacados is None or destacados.empty:
+        return ("Con la informacion disponible, ningun asesor supera todavia el umbral definido para "
+                "calificar como destacado (Indice de Salud del Negocio promedio de 80 o mas, con "
+                "antiguedad y produccion minimas).")
+    lider = destacados.iloc[0]
+    return (f"{len(destacados)} asesor(es) califican como destacados con el historico disponible. "
+            f"El de mejor desempeno es {lider['Nombre']}, con un Indice de Desempeno Destacado de "
+            f"{lider['Indice_Desempeno_Destacado']:.1f}: sostiene un promedio de "
+            f"{lider['Promedio_Indice_Salud']:.1f} en el Indice de Salud del Negocio durante "
+            f"{lider['Periodos_Evaluados']} periodo(s), con {lider['Consistencia_Pct']:.0f}% del "
+            f"tiempo en banda alta.")
 
 
 def gauge_semaforo(valor, titulo, umbral_bajo, umbral_alto, invertido=False):

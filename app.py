@@ -38,10 +38,14 @@ from analitica_avanzada import (
     calcular_escenarios_montecarlo, calcular_tendencia_proyeccion,
 )
 from reglas_cuaderno import generar_explicacion_bonos, generar_estimacion_bono_siguiente_periodo
-from hallazgos import generar_hallazgos, calcular_semaforo_general, clasificar_asesores_en_riesgo, generar_plan_mitigacion_riesgo
+from hallazgos import (
+    generar_hallazgos, calcular_semaforo_general, clasificar_asesores_en_riesgo,
+    generar_plan_mitigacion_riesgo, identificar_asesores_destacados, identificar_menciones_especiales,
+)
 from graficas import (
     grafica_tendencia_igc_limra, grafica_bono_total_mensual, grafica_composicion_bonos,
     grafica_segmentacion, grafica_real_vs_plan, grafica_flujo_simplificado, gauge_semaforo,
+    grafica_destacados_dispersion, interpretacion_destacados_dispersion,
     interpretacion_tendencia_igc_limra, interpretacion_bono_total_mensual,
     interpretacion_composicion_bonos, interpretacion_segmentacion,
     interpretacion_real_vs_plan, interpretacion_flujo,
@@ -231,6 +235,8 @@ if procesar and archivo_zip is not None:
         sensibilidad = calcular_analisis_sensibilidad(resumen_bonos, id_periodo)
         escenarios_montecarlo = calcular_escenarios_montecarlo(resumen_bonos)
         tendencia = calcular_tendencia_proyeccion(resumen_bonos)
+        destacados = identificar_asesores_destacados(segmentacion, comparativo, hist_actividad)
+        menciones_especiales = identificar_menciones_especiales(segmentacion, comparativo)
 
         ganadores_ta = ganadores_training_allowance if training_allowance_capturado else None
         explicacion_bonos = generar_explicacion_bonos(resumen_bonos, hist_gmm, dim_asesor, ganadores_ta)
@@ -243,6 +249,7 @@ if procesar and archivo_zip is not None:
             "Real_vs_Plan": real_vs_plan, "Costeo_Asesores": costeo_asesores, "ROI_Campanas": roi_campanas,
             "Comparativo_Incumplimientos": comparativo, "Seguimiento_IGC": seguimiento_igc,
             "Seguimiento_LIMRA": seguimiento_limra, "Segmentacion_Asesores": segmentacion,
+            "Asesores_Destacados": destacados,
             "Alertas_Anomalias": alertas_anomalias, "Escenarios_MonteCarlo": escenarios_montecarlo,
             "Tendencia_Proyeccion": tendencia, "Analisis_Sensibilidad": sensibilidad,
             "Historico_Actividad": hist_actividad, "Historico_GMM": hist_gmm,
@@ -255,6 +262,7 @@ if procesar and archivo_zip is not None:
             id_periodo=id_periodo, resumen_bonos=resumen_bonos, comparativo=comparativo,
             segmentacion=segmentacion, alertas_anomalias=alertas_anomalias, real_vs_plan=real_vs_plan,
             costeo_asesores=costeo_asesores, roi_campanas=roi_campanas, hist_traspasos=hist_traspasos,
+            destacados=destacados, menciones_especiales=menciones_especiales,
             explicacion_bonos=explicacion_bonos, estimacion_siguiente=estimacion_siguiente,
             escenarios_montecarlo=escenarios_montecarlo, tendencia=tendencia, sensibilidad=sensibilidad,
             ruta_excel=str(ruta_salida), tipos_faltantes=tipos_faltantes, no_reconocidos=no_reconocidos,
@@ -415,6 +423,62 @@ if "datos" in st.session_state:
                 <div class="hallazgo-seccion"><b>IMPACTO:</b> {h["impacto"]}</div>
                 <div class="hallazgo-seccion"><b>RECOMENDACION:</b> {h["recomendacion"]}</div>
                 </div>''', unsafe_allow_html=True)
+
+        # -----------------------------------------------------------------
+        # ASESORES DESTACADOS -- contraparte de "Asesores en Riesgo", justo
+        # antes de esa seccion (primero lo positivo, luego el riesgo).
+        # -----------------------------------------------------------------
+        st.markdown('<div class="seccion-titulo">Asesores Destacados -- Salud y Desempeno Sobresaliente</div>',
+                    unsafe_allow_html=True)
+        destacados, menciones = d["destacados"], d["menciones_especiales"]
+        seg = d["segmentacion"]
+
+        if seg is not None and not seg.empty and "Polizas_Vida" in seg.columns:
+            promedio_general = seg.groupby("ID_Asesor")["Polizas_Vida"].mean().mean()
+            if destacados is not None and not destacados.empty and pd.notna(promedio_general) and promedio_general > 0:
+                ids_dest = set(destacados["ID_Asesor"])
+                promedio_dest = seg[seg["ID_Asesor"].isin(ids_dest)].groupby("ID_Asesor")["Polizas_Vida"].mean().mean()
+                if pd.notna(promedio_dest):
+                    st.caption(
+                        f"Como grupo, los asesores destacados producen en promedio {promedio_dest / promedio_general:.1f}x "
+                        f"mas polizas de Vida por periodo que el promedio general de la fuerza de ventas evaluada "
+                        f"({promedio_dest:.1f} vs. {promedio_general:.1f} polizas)."
+                    )
+
+        st.plotly_chart(grafica_destacados_dispersion(seg, destacados), use_container_width=True)
+        st.markdown(f'<div class="interpretacion-box"><b>INTERPRETACION</b><br>'
+                    f'{interpretacion_destacados_dispersion(destacados)}</div>', unsafe_allow_html=True)
+
+        if menciones:
+            cols_menciones = st.columns(len(menciones))
+            for col, m in zip(cols_menciones, menciones):
+                with col:
+                    st.markdown(f'''<div class="hallazgo-card oportunidad">
+                        <div class="hallazgo-titulo">{m["Titulo"]} -- {m["Nombre"]}</div>
+                        <div class="hallazgo-seccion">{m["Explicacion"]}</div>
+                        </div>''', unsafe_allow_html=True)
+
+        st.markdown('<div class="seccion-titulo">Asesores Destacados -- Detalle Individual</div>', unsafe_allow_html=True)
+        if destacados is None or destacados.empty:
+            st.info("Ningun asesor supera el umbral definido para calificar como destacado este periodo.")
+        else:
+            def _fmt_pct(v, decimales=0):
+                return f"{v:.{decimales}f}%" if pd.notna(v) else "N/D"
+
+            filas_html_destacados = "".join(
+                f'''<div class="destacado-item">
+                    <div class="destacado-item-titulo">#{int(row["Posicion"])} -- Asesor {row["ID_Asesor"]} -- {row["Nombre"]}
+                        <span class="destacado-badge">{row["Titulo_Tematico"]}</span></div>
+                    <div class="destacado-item-linea"><b>Indice de Desempeno Destacado:</b> {row["Indice_Desempeno_Destacado"]:.1f}
+                        (Salud promedio {row["Promedio_Indice_Salud"]:.1f}, {row["Consistencia_Pct"]:.0f}% en banda alta)</div>
+                    <div class="destacado-item-linea"><b>Antiguedad:</b> {int(row["Meses_Antiguedad"])} mes(es) &nbsp;|&nbsp;
+                        <b>Mix de produccion (Vida):</b> {_fmt_pct(row["Pct_Mix_Vida"])} &nbsp;|&nbsp;
+                        <b>Aporte a meta anual de Vida:</b> {_fmt_pct(row["Aporte_Meta_Anual_Polizas_Pct"], 1)}</div>
+                    <div class="destacado-item-linea">{row["Explicacion"]}</div>
+                    </div>'''
+                for _, row in destacados.iterrows()
+            )
+            st.markdown(f'<div class="scroll-container">{filas_html_destacados}</div>', unsafe_allow_html=True)
 
         st.markdown('<div class="seccion-titulo">Asesores en Riesgo -- Detalle Individual</div>', unsafe_allow_html=True)
         tabla_riesgo = clasificar_asesores_en_riesgo(d["comparativo"], d["segmentacion"])

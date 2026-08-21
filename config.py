@@ -185,6 +185,39 @@ BANDAS_LECTURA_MENSUAL = [
     (0, 35, "Riesgo alto"),
 ]
 
+# ---------------------------------------------------------------------------
+# Asesores Destacados -- contraparte del analisis de riesgo. Reutiliza el
+# mismo Indice de Salud del Negocio (nunca se inventa un indicador nuevo
+# desde cero) y agrega el aporte al bono por actividad (Bono_Por_Asesor,
+# columna real de Historico_Actividad, distinta del Bono_Total oficial del
+# promotor -- nunca se confunde ni se suma contra ese dato oficial).
+# ---------------------------------------------------------------------------
+
+# Piso de calificacion: igual al piso de la banda "Alto desempeno" ya
+# definida en BANDAS_LECTURA_MENSUAL -- no se inventa un corte nuevo. Se
+# exige que el asesor lo haya alcanzado en AL MENOS UN mes de su historico
+# (no en el promedio) -- validado contra los 7 meses reales del proyecto:
+# exigirlo en el promedio dejaba la seccion vacia casi todos los meses,
+# porque el desempeno mensual es volatil incluso en los mejores asesores.
+# El ranking (Indice de Desempeno Destacado) si sigue premiando la
+# consistencia sobre todo el historico -- esto solo afecta quien califica.
+UMBRAL_INDICE_SALUD_DESTACADO = 80
+
+# Antiguedad minima (en meses) para calificar como destacado -- evita que un
+# asesor nuevo con un solo mes excelente entre por poca base de comparacion.
+MESES_ANTIGUEDAD_MINIMOS_DESTACADO = 3
+
+# Pesos del Indice de Desempeno Destacado (deben sumar 100). Promedio_Salud
+# reutiliza el Indice de Salud del Negocio ya calculado; Consistencia premia
+# sostener banda alta varios periodos, no solo un mes suelto; Aporte_Bono
+# usa Bono_Por_Asesor normalizado contra el maximo del grupo evaluado.
+PESOS_INDICE_DESTACADO = {"Promedio_Salud": 60, "Consistencia": 25, "Aporte_Bono": 15}
+
+# Piso fijo de asesores mostrados en el ranking. El tope real aplicado en
+# codigo es max(TOP_DESTACADOS_MINIMO, round(10% de asesores evaluados)),
+# para que equipos grandes muestren mas de 10 sin fijar un numero arbitrario.
+TOP_DESTACADOS_MINIMO = 10
+
 CANALES_RECLUTAMIENTO = [
     "OCC", "Facebook / Redes Sociales", "Instagram", "TikTok", "LinkedIn",
     "Pagina Web", "Google Business", "WhatsApp (grupos)", "Oficinas",

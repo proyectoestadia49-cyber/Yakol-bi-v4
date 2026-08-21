@@ -108,6 +108,16 @@ CSS_CORPORATIVO = f"""
     .riesgo-badge.riesgo-medio {{ background-color: {COLOR_ADVERTENCIA}; }}
     .riesgo-badge.riesgo-bajo {{ background-color: {COLOR_NEUTRO}; }}
 
+    .destacado-item {{ border-bottom: 1px solid #EDEFF3; padding: 12px 0; }}
+    .destacado-item:last-child {{ border-bottom: none; }}
+    .destacado-item-titulo {{ font-weight: 700; color: {COLOR_PRIMARIO}; font-size: 13.5px; margin-bottom: 4px; }}
+    .destacado-item-linea {{ font-size: 12.5px; color: #333; line-height: 1.5; margin-bottom: 2px; }}
+    .destacado-badge {{
+        display: inline-block; font-size: 10.5px; font-weight: 700; padding: 2px 9px;
+        border-radius: 10px; margin-left: 8px; color: white; vertical-align: middle;
+        background-color: {COLOR_EXITO};
+    }}
+
     .interpretacion-box {{
         background-color: #F4F7FB; border: 1px solid #E2E8F0; border-left: 4px solid {COLOR_SECUNDARIO};
         border-radius: 6px; padding: 12px 16px; margin: 6px 0 22px 0;

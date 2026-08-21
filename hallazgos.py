@@ -9,7 +9,13 @@ hallazgo indica de que hoja/calculo proviene, para que sea auditable.
 
 import pandas as pd
 
-from config import UMBRAL_IGC, UMBRAL_LIMRA
+from config import (
+    UMBRAL_IGC, UMBRAL_LIMRA, UMBRAL_INDICE_SALUD_DESTACADO,
+    MESES_ANTIGUEDAD_MINIMOS_DESTACADO, PESOS_INDICE_DESTACADO, TOP_DESTACADOS_MINIMO,
+    META_ANUAL_POLIZAS_VIDA, IDS_ASESOR_EXCLUIDOS,
+)
+
+BANDAS_ALTA_DESTACADO = ("Alto desempeno", "Negocio extraordinario")
 
 
 def clasificar_asesores_en_riesgo(comparativo: pd.DataFrame, segmentacion: pd.DataFrame) -> pd.DataFrame:
@@ -239,9 +245,10 @@ def generar_hallazgos(resumen_bonos, comparativo, segmentacion, alertas_anomalia
                 "evidencia": "Clasificacion 'Alto desempeno' (banda 80-89.99 del Indice de Salud del "
                              "Negocio) en el periodo mas reciente.",
                 "impacto": "Representan el activo comercial de mayor calidad de la promotoria en este momento.",
-                "recomendacion": "Considerarlos como candidatos naturales para roles de mentoria "
-                                 "(Asesor Desarrollador) o para campanas de reconocimiento que "
-                                 "refuercen su permanencia.",
+                "recomendacion": "Ver el detalle individual y el porque especifico de cada caso en la "
+                                 "seccion de Asesores Destacados, mas abajo. Son candidatos naturales "
+                                 "para roles de mentoria (Asesor Desarrollador) o para campanas de "
+                                 "reconocimiento que refuercen su permanencia.",
             })
         riesgo_alto = sub[sub["Segmento"] == "Riesgo alto"]
         if len(riesgo_alto) > 0:
@@ -437,3 +444,216 @@ def calcular_semaforo_general(comparativo, resumen_bonos):
     elif puntos_riesgo >= 1:
         return "medio", "Riesgo Medio"
     return "bajo", "Riesgo Bajo"
+
+
+# ===========================================================================
+# ASESORES DESTACADOS -- contraparte de la clasificacion de riesgo. Usa TODO
+# el historico disponible (no solo el ultimo mes) y reutiliza el Indice de
+# Salud del Negocio ya calculado (analitica_avanzada.py); no se inventa un
+# indicador nuevo desde cero, solo se combina con consistencia en el tiempo
+# y aporte al bono por actividad. Ver notas metodologicas en config.py.
+# ===========================================================================
+
+def identificar_asesores_destacados(segmentacion: pd.DataFrame, comparativo: pd.DataFrame,
+                                     hist_actividad: pd.DataFrame) -> pd.DataFrame:
+    """Identifica y explica a los asesores de mejor desempeno, exactamente
+    como clasificar_asesores_en_riesgo identifica y explica a los de mayor
+    riesgo -- misma exigencia de que cada explicacion se derive de datos
+    reales y nunca sea generica ni repetida entre asesores.
+
+    Calificacion: promedio del Indice de Salud del Negocio >= umbral fijo
+    (UMBRAL_INDICE_SALUD_DESTACADO), con antiguedad minima y produccion real
+    en el periodo mas reciente como filtros de entrada -- evita que un
+    asesor nuevo con un solo mes bueno, o sin actividad real, califique por
+    casualidad. El ranking final se ordena por un Indice de Desempeno
+    Destacado propio (PESOS_INDICE_DESTACADO: promedio de salud +
+    consistencia en banda alta + aporte al bono por actividad)."""
+    if segmentacion is None or segmentacion.empty or "Indice_Salud_Negocio" not in segmentacion.columns:
+        return pd.DataFrame()
+
+    seg = segmentacion[~segmentacion["ID_Asesor"].astype(str).isin(IDS_ASESOR_EXCLUIDOS)].copy()
+    if seg.empty:
+        return pd.DataFrame()
+    ultimo_periodo = seg["ID_Periodo"].max()
+
+    # Nombre y antiguedad se toman de Comparativo_Incumplimientos -- ya
+    # excluye la cuenta tecnica y ya trae Meses_Antiguedad calculado contra
+    # la rampa de proteccion, no se duplica esa logica aqui.
+    info_asesor = {}
+    if comparativo is not None and not comparativo.empty:
+        sub_comp = comparativo[comparativo["ID_Periodo"] == ultimo_periodo]
+        info_asesor = sub_comp.drop_duplicates("ID_Asesor").set_index("ID_Asesor")[
+            ["Nombre_Asesor", "Meses_Antiguedad"]].to_dict("index")
+
+    # Aporte al bono por actividad (Bono_Por_Asesor, columna real de
+    # Historico_Actividad) -- NUNCA el Bono_Total oficial del promotor, que
+    # nunca se recalcula ni se descompone (regla de oro del proyecto).
+    bono_por_asesor = pd.Series(dtype=float)
+    if hist_actividad is not None and not hist_actividad.empty and "Bono_Por_Asesor" in hist_actividad.columns:
+        bono_por_asesor = hist_actividad.groupby("ID_Asesor")["Bono_Por_Asesor"].sum()
+    max_bono = bono_por_asesor.max() if len(bono_por_asesor) else 0
+
+    mes_num_referencia = int(str(ultimo_periodo)[4:6])
+    meta_polizas_prorrateada = META_ANUAL_POLIZAS_VIDA / 12 * mes_num_referencia
+
+    filas = []
+    for id_asesor, grupo in seg.groupby("ID_Asesor"):
+        promedio_salud = grupo["Indice_Salud_Negocio"].mean(skipna=True)
+        mejor_salud = grupo["Indice_Salud_Negocio"].max(skipna=True)
+        # Calificacion: haber alcanzado el umbral en AL MENOS UN mes del
+        # historico (no el promedio) -- validado contra datos reales: exigir
+        # el umbral en el promedio de todo el historico dejaba la seccion
+        # vacia casi todos los meses, porque el desempeno mes a mes es
+        # volatil incluso en los mejores asesores. El ranking (mas abajo)
+        # SI sigue premiando la consistencia sobre todo el historico -- este
+        # cambio solo afecta el filtro de entrada, no el orden final.
+        if pd.isna(mejor_salud) or mejor_salud < UMBRAL_INDICE_SALUD_DESTACADO:
+            continue
+
+        datos = info_asesor.get(id_asesor, {})
+        meses_antiguedad = datos.get("Meses_Antiguedad")
+        if meses_antiguedad is None or pd.isna(meses_antiguedad) or meses_antiguedad < MESES_ANTIGUEDAD_MINIMOS_DESTACADO:
+            continue
+
+        ultimo = grupo[grupo["ID_Periodo"] == ultimo_periodo]
+        if ultimo.empty:
+            continue
+        polizas_vida_ultimo = ultimo["Polizas_Vida"].iloc[0] if pd.notna(ultimo["Polizas_Vida"].iloc[0]) else 0
+        polizas_gmm_ultimo = ultimo["Polizas_GMM"].iloc[0] if pd.notna(ultimo["Polizas_GMM"].iloc[0]) else 0
+        if polizas_vida_ultimo == 0 and polizas_gmm_ultimo == 0:
+            continue  # sin produccion real en el periodo mas reciente, no califica
+
+        n_periodos = int(grupo["Indice_Salud_Negocio"].notna().sum())
+        n_banda_alta = int(grupo["Segmento"].isin(BANDAS_ALTA_DESTACADO).sum())
+        consistencia_pct = (n_banda_alta / n_periodos * 100) if n_periodos else 0
+
+        bono_asesor = bono_por_asesor.get(id_asesor, 0) or 0
+        aporte_bono_norm = (bono_asesor / max_bono * 100) if max_bono > 0 else 0
+
+        indice_destacado = (
+            promedio_salud * PESOS_INDICE_DESTACADO["Promedio_Salud"] +
+            consistencia_pct * PESOS_INDICE_DESTACADO["Consistencia"] +
+            aporte_bono_norm * PESOS_INDICE_DESTACADO["Aporte_Bono"]
+        ) / 100
+
+        polizas_vida_total = grupo["Polizas_Vida"].sum(skipna=True)
+        polizas_gmm_total = grupo["Polizas_GMM"].sum(skipna=True)
+        total_polizas = polizas_vida_total + polizas_gmm_total
+        pct_mix_vida = (polizas_vida_total / total_polizas * 100) if total_polizas > 0 else None
+
+        limra_vals = grupo["LIMRA_Indice_Real"].dropna()
+        igc_vals = grupo["IGC_Indice_Real"].dropna()
+        margen_limra = (limra_vals.mean() - UMBRAL_LIMRA) if len(limra_vals) else None
+        margen_igc = (igc_vals.mean() - UMBRAL_IGC) if len(igc_vals) else None
+
+        aporte_meta_pct = (polizas_vida_total / meta_polizas_prorrateada * 100) if meta_polizas_prorrateada else None
+
+        nombre = datos.get("Nombre_Asesor") or f"Asesor {id_asesor}"
+
+        partes = [f"un promedio de {promedio_salud:.1f} en el Indice de Salud del Negocio a lo largo de "
+                  f"{n_periodos} periodo(s) evaluado(s)"]
+        if consistencia_pct >= 50:
+            partes.append(f"sosteniendo banda alta el {consistencia_pct:.0f}% de ese tiempo")
+        if margen_limra is not None and margen_igc is not None:
+            partes.append(f"con margen normativo de +{margen_limra:.1f} en LIMRA y +{margen_igc:.1f} en IGC "
+                           f"sobre los minimos oficiales")
+        explicacion = f"{nombre} destaca por {', '.join(partes)}."
+
+        filas.append({
+            "ID_Asesor": id_asesor, "Nombre": nombre,
+            "Indice_Desempeno_Destacado": round(indice_destacado, 2),
+            "Promedio_Indice_Salud": round(promedio_salud, 2),
+            "Consistencia_Pct": round(consistencia_pct, 1),
+            "Periodos_Evaluados": n_periodos,
+            "Meses_Antiguedad": meses_antiguedad,
+            "Pct_Mix_Vida": round(pct_mix_vida, 1) if pct_mix_vida is not None else None,
+            "Margen_LIMRA": round(margen_limra, 2) if margen_limra is not None else None,
+            "Margen_IGC": round(margen_igc, 2) if margen_igc is not None else None,
+            "Aporte_Bono_Por_Asesor": round(bono_asesor, 2),
+            "Aporte_Meta_Anual_Polizas_Pct": round(aporte_meta_pct, 1) if aporte_meta_pct is not None else None,
+            "Explicacion": explicacion,
+        })
+
+    if not filas:
+        return pd.DataFrame()
+
+    resultado = pd.DataFrame(filas).sort_values("Indice_Desempeno_Destacado", ascending=False).reset_index(drop=True)
+
+    # Tope: max(10, 10% de los asesores evaluados ese periodo) -- para que
+    # un equipo grande no se limite artificialmente a 10 y uno pequeno no
+    # se quede sin margen. Ver TOP_DESTACADOS_MINIMO en config.py.
+    total_evaluados = seg["ID_Asesor"].nunique()
+    tope = max(TOP_DESTACADOS_MINIMO, round(0.10 * total_evaluados))
+    resultado = resultado.head(tope).reset_index(drop=True)
+
+    def _titulo_tematico(posicion):
+        if posicion == 0:
+            return "Asesor del Mes"
+        if posicion <= 2:
+            return "Alto Desempeno Sobresaliente"
+        return "Asesor Destacado"
+
+    resultado["Titulo_Tematico"] = [_titulo_tematico(i) for i in range(len(resultado))]
+    resultado["Posicion"] = range(1, len(resultado) + 1)
+    return resultado
+
+
+def identificar_menciones_especiales(segmentacion: pd.DataFrame, comparativo: pd.DataFrame) -> list:
+    """Genera menciones especiales tematicas que complementan (nunca
+    sustituyen) el ranking general de identificar_asesores_destacados:
+    'Mejor Progreso' (mayor mejora del Indice de Salud a lo largo del
+    historico disponible) y 'Mejor Cumplimiento Normativo' (mayor margen
+    promedio sobre los minimos LIMRA/IGC)."""
+    menciones = []
+    if segmentacion is None or segmentacion.empty or "Indice_Salud_Negocio" not in segmentacion.columns:
+        return menciones
+
+    seg = segmentacion[~segmentacion["ID_Asesor"].astype(str).isin(IDS_ASESOR_EXCLUIDOS)]
+    if seg.empty:
+        return menciones
+
+    nombres = {}
+    if comparativo is not None and not comparativo.empty:
+        nombres = comparativo.drop_duplicates("ID_Asesor").set_index("ID_Asesor")["Nombre_Asesor"].to_dict()
+
+    def _nombre(id_asesor):
+        return nombres.get(id_asesor) or f"Asesor {id_asesor}"
+
+    progresos = []
+    for id_asesor, grupo in seg.groupby("ID_Asesor"):
+        g = grupo.dropna(subset=["Indice_Salud_Negocio"]).sort_values("ID_Periodo")
+        if len(g) < 2:
+            continue
+        inicial, final = g["Indice_Salud_Negocio"].iloc[0], g["Indice_Salud_Negocio"].iloc[-1]
+        progresos.append((id_asesor, final - inicial, inicial, final, len(g)))
+    if progresos:
+        id_asesor, delta, inicial, final, n = max(progresos, key=lambda p: p[1])
+        if delta > 0:
+            nombre = _nombre(id_asesor)
+            menciones.append({
+                "Titulo": "Mejor Progreso", "ID_Asesor": id_asesor, "Nombre": nombre,
+                "Explicacion": (f"{nombre} tuvo la mayor mejora del periodo: su Indice de Salud del "
+                                f"Negocio paso de {inicial:.1f} a {final:.1f} a lo largo de {n} "
+                                f"periodos ({delta:+.1f} puntos)."),
+            })
+
+    margenes = []
+    for id_asesor, grupo in seg.groupby("ID_Asesor"):
+        limra_vals = grupo["LIMRA_Indice_Real"].dropna()
+        igc_vals = grupo["IGC_Indice_Real"].dropna()
+        if not len(limra_vals) or not len(igc_vals):
+            continue
+        margen = ((limra_vals.mean() - UMBRAL_LIMRA) + (igc_vals.mean() - UMBRAL_IGC)) / 2
+        margenes.append((id_asesor, margen))
+    if margenes:
+        id_asesor, margen = max(margenes, key=lambda p: p[1])
+        if margen > 0:
+            nombre = _nombre(id_asesor)
+            menciones.append({
+                "Titulo": "Mejor Cumplimiento Normativo", "ID_Asesor": id_asesor, "Nombre": nombre,
+                "Explicacion": (f"{nombre} mantiene el mayor margen promedio sobre los minimos "
+                                f"normativos: {margen:+.1f} puntos en promedio entre LIMRA e IGC "
+                                f"durante el historico disponible."),
+            })
+
+    return menciones
